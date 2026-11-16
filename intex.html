@@ -1,0 +1,242 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Empire Builder</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0b1220;color:#eef4ff;font:14px system-ui}
+header{padding:12px;background:#101827;position:sticky;top:0}
+h1{font-size:21px;margin:0 0 8px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.stat,.panel{background:#172438;border:1px solid #30415a;border-radius:10px;padding:9px}
+small,.muted{color:#9eabc0}
+.stat b{display:block}
+main{max-width:900px;margin:auto;padding:10px;display:grid;gap:10px}
+h2{font-size:15px;margin:0 0 9px}
+button{background:#253852;color:white;border:1px solid #49617e;border-radius:8px;padding:8px;font:inherit}
+button:disabled{opacity:.4}
+#city{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.tile{aspect-ratio:1;min-width:0;padding:2px;display:grid;place-items:center;background:#1b3040}
+.tile span{font-size:22px}.tile small{font-size:9px}
+.empty{border-style:dashed;background:#122033}
+.selected{outline:2px solid #ffd166}
+.buildings{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+.build{text-align:left;width:100%}
+.build small{display:block}
+.row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+input{background:#0b1627;color:white;border:1px solid #49617e;border-radius:8px;padding:9px;min-width:0;flex:1}
+.green{background:#205c45}.gold{background:#685020}.danger{background:#63313b}
+@media(min-width:700px){main{grid-template-columns:1.2fr .8fr}.wide{grid-column:1/-1}}
+</style>
+</head>
+<body>
+<header>
+<h1>🏙️ Empire Builder</h1>
+<div class="stats">
+<div class="stat"><small>💰 CASH</small><b id="cash">₪100</b></div>
+<div class="stat"><small>📈 INCOME / SEC</small><b id="income">₪0</b></div>
+<div class="stat"><small>🏗️ BUILDINGS</small><b id="count">0 / 42</b></div>
+</div>
+</header>
+<main>
+<section class="panel wide">
+<h2>Your City</h2>
+<div id="city"></div>
+<p class="muted" id="info">Choose a building, then tap an empty tile.</p>
+<div class="row">
+<button id="upgrade" disabled>⬆ Upgrade</button>
+<button id="delete" class="danger" disabled>🗑 Delete</button>
+<button id="deselect">Deselect</button>
+</div>
+</section>
+<section class="panel">
+<h2>🏗️ Build</h2>
+<div class="buildings" id="buildings"></div>
+</section>
+<section class="panel">
+<h2>⚡ Powers</h2>
+<p>Rush Hour: double income for 30 seconds.</p>
+<button id="rush">Use Rush Hour · ₪500</button>
+<p>Cash Drop: collect 60 seconds of income.</p>
+<button id="drop">Cash Drop</button>
+</section>
+<section class="panel">
+<h2>🌳 Skills & Rebirth</h2>
+<p id="skillinfo">Income boost: level 0</p>
+<button id="skill">Unlock skill · ₪5,000</button>
+<p id="rebirthinfo">Rebirth requires ₪1,000,000.</p>
+<button id="rebirth" class="gold" disabled>Rebirth</button>
+</section>
+<section class="panel">
+<h2>🎯 Missions & Daily Reward</h2>
+<p id="mission">Build 3 buildings to earn ₪1,000.</p>
+<button id="missionclaim" disabled>Claim mission</button>
+<div class="row"><button id="daily" class="gold">🎁 Daily ₪1,000</button></div>
+<p id="dailyinfo" class="muted"></p>
+</section>
+<section class="panel">
+<h2>🎟️ Redeem Code</h2>
+<div class="row">
+<input id="code" placeholder="Enter a code">
+<button id="redeem" class="green">Redeem</button>
+</div>
+<small>Prototype codes are visible in the game source.</small>
+</section>
+<section class="panel">
+<h2>📜 City Log</h2>
+<div id="log" class="muted">Welcome, mayor!</div>
+<div class="row">
+<button id="save">Save</button>
+<button id="reset" class="danger">Reset</button>
+<span id="saved" class="muted"></span>
+</div>
+</section>
+</main>
+<script>
+(()=>{
+const KEY='empire-builder-save-v3';
+const defs=[
+['house','House','🏠',100,5],
+['cafe','Cafe','☕',300,12],
+['shop','Shop','🏪',900,35],
+['office','Office','🏢',4000,150],
+['park','Park','🌳',8000,250],
+['hotel','Hotel','🏨',25000,900],
+['hospital','Hospital','🏥',100000,3500],
+['factory','Factory','🏭',500000,18000],
+['mall','Mall','🛍️',3000000,110000],
+['tower','Business Tower','🏙️',20000000,750000],
+['stadium','Stadium','🏟️',150000000,5000000],
+['space','Space Center','🚀',500000000,18000000]
+];
+const codes={EMPIRESTART:5000,BUILDERBOOST:25000,CITYLEGEND:100000,MEGACITY:1000000};
+let s={
+cash:100,tiles:Array(42).fill(null),chosen:'house',
+selected:-1,skill:0,rebirth:0,built:0,
+redeemed:[],daily:'',mission:false,log:[]
+};
+let boost=0,last=Date.now();
+const $=id=>document.getElementById(id);
+const money=n=>'₪'+Math.floor(n).toLocaleString('en-US');
+const def=id=>defs.find(x=>x[0]===id);
+try{
+let old=JSON.parse(localStorage.getItem(KEY));
+if(old&&old.tiles?.length===42)s={...s,...old};
+}catch(e){}
+function income(){
+return s.tiles.reduce((a,t)=>a+(t?def(t.id)[4]*Math.pow(1.6,t.lv):0),0)
+*(1+s.skill*.25)*(1+s.rebirth*.5);
+}
+function log(msg){
+s.log.unshift(msg);s.log=s.log.slice(0,5);
+$('log').innerHTML=s.log.map(x=>'• '+x).join('<br>');
+}
+function save(){
+localStorage.setItem(KEY,JSON.stringify(s));
+$('saved').textContent='Saved ✓';
+}
+function draw(){
+$('cash').textContent=money(s.cash);
+$('income').textContent=money(income());
+$('count').textContent=s.tiles.filter(Boolean).length+' / 42';
+$('city').innerHTML=s.tiles.map((t,i)=>t?
+'<button class="tile '+(s.selected===i?'selected':'')+'" data-i="'+i+'"><span>'+def(t.id)[2]+'</span><small>'+def(t.id)[1]+' Lv.'+(t.lv+1)+'</small></button>':
+'<button class="tile empty" data-i="'+i+'"><span>＋</span><small>Empty</small></button>'
+).join('');
+document.querySelectorAll('[data-i]').forEach(e=>e.onclick=()=>tap(+e.dataset.i));
+$('buildings').innerHTML=defs.map(b=>
+'<button class="build" data-b="'+b[0]+'">'+b[2]+' '+b[1]+'<small>'+money(b[3])+' · '+money(b[4])+'/sec</small></button>'
+).join('');
+document.querySelectorAll('[data-b]').forEach(e=>e.onclick=()=>{
+s.chosen=e.dataset.b;s.selected=-1;draw();
+});
+let t=s.tiles[s.selected];
+$('upgrade').disabled=!t;
+$('delete').disabled=!t;
+$('info').textContent=t?
+def(t.id)[1]+' · Level '+(t.lv+1)+' · '+money(def(t.id)[4]*Math.pow(1.6,t.lv))+'/sec':
+'Selected: '+def(s.chosen)[1]+'. Tap an empty tile.';
+$('upgrade').textContent=t?'⬆ Upgrade · '+money(def(t.id)[3]*.75*Math.pow(2,t.lv)):'⬆ Upgrade';
+$('rebirth').disabled=s.cash<1000000;
+$('rebirthinfo').textContent='Rebirths: '+s.rebirth+' · +'+(s.rebirth*50)+'% income. Need ₪1,000,000.';
+$('skillinfo').textContent='Income boost: level '+s.skill+' · +25% each';
+$('skill').textContent='Unlock skill · '+money(5000*Math.pow(4,s.skill));
+$('mission').textContent='Build 3 buildings: '+Math.min(3,s.built)+'/3 · Reward ₪1,000';
+$('missionclaim').disabled=s.built<3||s.mission;
+$('dailyinfo').textContent=s.daily===new Date().toDateString()?'Already claimed today.':'One reward per day.';
+}
+function tap(i){
+if(s.tiles[i]){s.selected=i;draw();return;}
+let b=def(s.chosen);
+if(s.cash<b[3]){log('Not enough cash.');return;}
+s.cash-=b[3];s.tiles[i]={id:b[0],lv:0};
+s.selected=i;s.built++;log('Built '+b[1]);draw();save();
+}
+$('upgrade').onclick=()=>{
+let t=s.tiles[s.selected];if(!t)return;
+let c=Math.ceil(def(t.id)[3]*.75*Math.pow(2,t.lv));
+if(s.cash<c)return;
+s.cash-=c;t.lv++;log('Building upgraded.');draw();save();
+};
+$('delete').onclick=()=>{
+let t=s.tiles[s.selected];if(!t)return;
+s.cash+=Math.floor(def(t.id)[3]*.35);
+s.tiles[s.selected]=null;s.selected=-1;
+log('Building removed; partial refund.');draw();save();
+};
+$('deselect').onclick=()=>{s.selected=-1;draw();};
+$('rush').onclick=()=>{
+if(s.cash<500)return;
+s.cash-=500;boost=Date.now()+30000;
+log('Rush Hour activated!');draw();save();
+};
+$('drop').onclick=()=>{
+let n=Math.max(100,income()*60);
+s.cash+=n;log('Cash Drop: '+money(n));draw();save();
+};
+$('skill').onclick=()=>{
+let c=5000*Math.pow(4,s.skill);
+if(s.cash<c||s.skill>=5)return;
+s.cash-=c;s.skill++;log('Income skill upgraded.');draw();save();
+};
+$('rebirth').onclick=()=>{
+if(s.cash<1000000)return;
+if(!confirm('Reset your city and cash for permanent +50% income?'))return;
+s.rebirth++;s.cash=100;s.tiles=Array(42).fill(null);
+s.built=0;s.selected=-1;log('Rebirth complete!');draw();save();
+};
+$('missionclaim').onclick=()=>{
+if(s.built<3||s.mission)return;
+s.mission=true;s.cash+=1000;log('Mission reward: ₪1,000');draw();save();
+};
+$('daily').onclick=()=>{
+let d=new Date().toDateString();if(s.daily===d)return;
+s.daily=d;s.cash+=1000;log('Daily reward: ₪1,000');draw();save();
+};
+$('redeem').onclick=()=>{
+let c=$('code').value.trim().toUpperCase();
+if(!Object.prototype.hasOwnProperty.call(codes,c)||s.redeemed.includes(c)){
+alert('Invalid or already used code.');return;
+}
+s.cash+=codes[c];s.redeemed.push(c);$('code').value='';
+log('Code redeemed: '+c);draw();save();
+alert('Code accepted! '+money(codes[c])+' added.');
+};
+$('save').onclick=save;
+$('reset').onclick=()=>{
+if(confirm('Erase this device save?')){localStorage.removeItem(KEY);location.reload();}
+};
+draw();
+setInterval(()=>{
+let now=Date.now(),dt=Math.min(2,(now-last)/1000);last=now;
+s.cash+=income()*dt*(now<boost?2:1);draw();
+},1000);
+setInterval(save,10000);
+addEventListener('beforeunload',save);
+})();
+</script>
+</body>
+</html>
